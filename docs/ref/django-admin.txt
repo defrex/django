@@ -354,6 +354,11 @@ needed.
 ``inspectdb`` works with PostgreSQL, MySQL and SQLite. Foreign-key detection
 only works in PostgreSQL and with certain types of MySQL tables.
 
+Django doesn't create database defaults when a
+:attr:`~django.db.models.Field.default` is specified on a model field.
+Similarly, database defaults aren't translated to model field defaults or
+detected in any fashion by ``inspectdb``.
+
 By default, ``inspectdb`` creates unmanaged models. That is, ``managed = False``
 in the model's ``Meta`` class tells Django not to manage each table's creation,
 modification, and deletion. If you do want to allow Django to manage the
@@ -1126,6 +1131,8 @@ sqlmigrate <app_label> <migrationname>
 Prints the SQL for the named migration. This requires an active database
 connection, which it will use to resolve constraint names; this means you must
 generate the SQL against a copy of the database you wish to later apply it on.
+
+Note that ``sqlmigrate`` doesn't colorize its output.
 
 The :djadminopt:`--database` option can be used to specify the database for
 which to generate the SQL.

@@ -237,9 +237,17 @@ class MigrationAutodetector(object):
                     deps_satisfied = True
                     operation_dependencies = set()
                     for dep in operation._auto_deps:
+                        is_swappable_dep = False
                         if dep[0] == "__setting__":
-                            operation_dependencies.add((dep[0], dep[1]))
-                        elif dep[0] != app_label:
+                            # We need to temporarily resolve the swappable dependency to prevent
+                            # circular references. While keeping the dependency checks on the
+                            # resolved model we still add the swappable dependencies.
+                            # See #23322
+                            resolved_app_label, resolved_object_name = getattr(settings, dep[1]).split('.')
+                            original_dep = dep
+                            dep = (resolved_app_label, resolved_object_name.lower(), dep[2], dep[3])
+                            is_swappable_dep = True
+                        if dep[0] != app_label and dep[0] != "__setting__":
                             # External app dependency. See if it's not yet
                             # satisfied.
                             for other_operation in self.generated_operations.get(dep[0], []):
@@ -249,7 +257,9 @@ class MigrationAutodetector(object):
                             if not deps_satisfied:
                                 break
                             else:
-                                if self.migrations.get(dep[0], None):
+                                if is_swappable_dep:
+                                    operation_dependencies.add((original_dep[0], original_dep[1]))
+                                elif dep[0] in self.migrations:
                                     operation_dependencies.add((dep[0], self.migrations[dep[0]][-1].name))
                                 else:
                                     # If we can't find the other app, we add a first/last dependency,
@@ -286,7 +296,7 @@ class MigrationAutodetector(object):
                 if not chop_mode:
                     chop_mode = True
                 else:
-                    raise ValueError("Cannot resolve operation dependencies")
+                    raise ValueError("Cannot resolve operation dependencies: %r" % self.generated_operations)
             num_ops = new_num_ops
 
         # OK, add in internal dependencies among the migrations
@@ -361,10 +371,13 @@ class MigrationAutodetector(object):
         else:
             raise ValueError("Can't handle dependency %r" % (dependency, ))
 
-    def add_operation(self, app_label, operation, dependencies=None):
+    def add_operation(self, app_label, operation, dependencies=None, beginning=False):
         # Dependencies are (app_label, model_name, field_name, create/delete as True/False)
         operation._auto_deps = dependencies or []
-        self.generated_operations.setdefault(app_label, []).append(operation)
+        if beginning:
+            self.generated_operations.setdefault(app_label, []).insert(0, operation)
+        else:
+            self.generated_operations.setdefault(app_label, []).append(operation)
 
     def swappable_first_key(self, item):
         """
@@ -429,7 +442,7 @@ class MigrationAutodetector(object):
         that might be deferred (e.g. unique_together, index_together)
         """
         added_models = set(self.new_model_keys) - set(self.old_model_keys)
-        for app_label, model_name in sorted(added_models, key=self.swappable_first_key):
+        for app_label, model_name in sorted(added_models, key=self.swappable_first_key, reverse=True):
             model_state = self.to_state.models[app_label, model_name]
             # Gather related fields
             related_fields = {}
@@ -481,6 +494,7 @@ class MigrationAutodetector(object):
                     bases=model_state.bases,
                 ),
                 dependencies=dependencies,
+                beginning=True,
             )
             # Generate operations for each related field
             for name, field in sorted(related_fields.items()):
