@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 import datetime
 import unittest
 
@@ -318,6 +317,9 @@ class SchemaTests(TransactionTestCase):
         if connection.vendor == 'mysql':
             self.assertEqual(field_type, 'IntegerField')
             self.assertEqual(field_info.precision, 1)
+        elif connection.vendor == 'oracle' and connection.version_has_default_introspection_bug:
+            self.assertEqual(field_type, 'IntegerField')
+            self.assertEqual(field_info.precision, 0)
         else:
             self.assertEqual(field_type, 'BooleanField')
 
