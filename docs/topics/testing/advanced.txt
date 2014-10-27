@@ -37,7 +37,7 @@ Example
 
 The following is a simple unit test using the request factory::
 
-    from django.contrib.auth.models import User
+    from django.contrib.auth.models import AnonymousUser, User
     from django.test import TestCase, RequestFactory
 
     class SimpleTest(TestCase):
@@ -54,6 +54,10 @@ The following is a simple unit test using the request factory::
             # Recall that middleware are not supported. You can simulate a
             # logged-in user by setting request.user manually.
             request.user = self.user
+
+            # Or you can simulate an anonymous user by setting request.user to
+            # an AnonymousUser instance.
+            request.user = AnonymousUser()
 
             # Test my_view() as if it were deployed at /customer/details
             response = my_view(request)
@@ -507,8 +511,14 @@ can be useful during testing.
     ``serialize`` determines if Django serializes the database into an
     in-memory JSON string before running tests (used to restore the database
     state between tests if you don't have transactions). You can set this to
-    False to significantly speed up creation time if you know you don't need
-    data persistence outside of test fixtures.
+    ``False`` to speed up creation time if you don't have any test classes
+    with :ref:`serialized_rollback=True <test-case-serialized-rollback>`.
+
+    .. versionadded:: 1.7.1
+
+        If you are using the default test runner, you can control this with the
+        the :setting:`SERIALIZE <TEST_SERIALIZE>` entry in the
+        :setting:`TEST <DATABASE-TEST>` dictionary
 
     Returns the name of the test database that it created.
 

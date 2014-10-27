@@ -16,7 +16,7 @@ from django.conf import settings
 from django.utils import datetime_safe, six
 from django.utils.deconstruct import deconstructible
 from django.utils.translation import ugettext_lazy as _
-from django.utils.timezone import get_default_timezone
+from django.utils.timezone import get_default_timezone, utc, FixedOffset
 
 import custom_migration_operations.operations
 import custom_migration_operations.more_operations
@@ -81,6 +81,11 @@ class WriterTests(TestCase):
         self.assertSerializedEqual(set([2, 3, "eighty"]))
         self.assertSerializedEqual({"lalalala": ["yeah", "no", "maybe"]})
         self.assertSerializedEqual(_('Hello'))
+        # Builtins
+        self.assertSerializedEqual([list, tuple, dict, set])
+        string, imports = MigrationWriter.serialize([list, tuple, dict, set])
+        self.assertEqual(string, "[list, tuple, dict, set]")
+        self.assertEqual(imports, set())
         # Functions
         with six.assertRaisesRegex(self, ValueError, 'Cannot serialize function: lambda'):
             self.assertSerializedEqual(lambda x: 42)
@@ -96,8 +101,8 @@ class WriterTests(TestCase):
         self.assertSerializedEqual(datetime.date.today())
         self.assertSerializedEqual(datetime.date.today)
         self.assertSerializedEqual(datetime.datetime.now().time())
-        with self.assertRaises(ValueError):
-            self.assertSerializedEqual(datetime.datetime(2012, 1, 1, 1, 1, tzinfo=get_default_timezone()))
+        self.assertSerializedEqual(datetime.datetime(2014, 1, 1, 1, 1, tzinfo=get_default_timezone()))
+        self.assertSerializedEqual(datetime.datetime(2014, 1, 1, 1, 1, tzinfo=FixedOffset(180)))
         safe_date = datetime_safe.date(2014, 3, 31)
         string, imports = MigrationWriter.serialize(safe_date)
         self.assertEqual(string, repr(datetime.date(2014, 3, 31)))
@@ -106,6 +111,10 @@ class WriterTests(TestCase):
         string, imports = MigrationWriter.serialize(safe_datetime)
         self.assertEqual(string, repr(datetime.datetime(2014, 3, 31, 16, 4, 31)))
         self.assertEqual(imports, {'import datetime'})
+        timezone_aware_datetime = datetime.datetime(2012, 1, 1, 1, 1, tzinfo=utc)
+        string, imports = MigrationWriter.serialize(timezone_aware_datetime)
+        self.assertEqual(string, "datetime.datetime(2012, 1, 1, 1, 1, tzinfo=utc)")
+        self.assertEqual(imports, {'import datetime', 'from django.utils.timezone import utc'})
         # Django fields
         self.assertSerializedFieldEqual(models.CharField(max_length=255))
         self.assertSerializedFieldEqual(models.TextField(null=True, blank=True))
@@ -167,9 +176,17 @@ class WriterTests(TestCase):
         self.assertEqual(string, "django.core.validators.EmailValidator(message='hello')")
         self.serialize_round_trip(validator)
 
-        validator = deconstructible(path="custom.EmailValidator")(EmailValidator)(message="hello")
+        validator = deconstructible(path="migrations.test_writer.EmailValidator")(EmailValidator)(message="hello")
         string = MigrationWriter.serialize(validator)[0]
-        self.assertEqual(string, "custom.EmailValidator(message='hello')")
+        self.assertEqual(string, "migrations.test_writer.EmailValidator(message='hello')")
+
+        validator = deconstructible(path="custom.EmailValidator")(EmailValidator)(message="hello")
+        with six.assertRaisesRegex(self, ImportError, "No module named '?custom'?"):
+            MigrationWriter.serialize(validator)
+
+        validator = deconstructible(path="django.core.validators.EmailValidator2")(EmailValidator)(message="hello")
+        with self.assertRaisesMessage(ValueError, "Could not find object EmailValidator2 in django.core.validators."):
+            MigrationWriter.serialize(validator)
 
     def test_serialize_empty_nonempty_tuple(self):
         """
@@ -299,3 +316,22 @@ class WriterTests(TestCase):
             result['custom_migration_operations'].operations.TestOperation,
             result['custom_migration_operations'].more_operations.TestOperation
         )
+
+    def test_serialize_datetime(self):
+        """
+        #23365 -- Timezone-aware datetimes should be allowed.
+        """
+        # naive datetime
+        naive_datetime = datetime.datetime(2014, 1, 1, 1, 1)
+        self.assertEqual(MigrationWriter.serialize_datetime(naive_datetime),
+                         "datetime.datetime(2014, 1, 1, 1, 1)")
+
+        # datetime with utc timezone
+        utc_datetime = datetime.datetime(2014, 1, 1, 1, 1, tzinfo=utc)
+        self.assertEqual(MigrationWriter.serialize_datetime(utc_datetime),
+                         "datetime.datetime(2014, 1, 1, 1, 1, tzinfo=utc)")
+
+        # datetime with FixedOffset tzinfo
+        fixed_offset_datetime = datetime.datetime(2014, 1, 1, 1, 1, tzinfo=FixedOffset(180))
+        self.assertEqual(MigrationWriter.serialize_datetime(fixed_offset_datetime),
+                         "datetime.datetime(2013, 12, 31, 22, 1, tzinfo=utc)")

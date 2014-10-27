@@ -3,7 +3,8 @@ import unittest
 
 from django.test import TransactionTestCase
 from django.db import connection, DatabaseError, IntegrityError, OperationalError
-from django.db.models.fields import IntegerField, TextField, CharField, SlugField, BooleanField, BinaryField
+from django.db.models.fields import (BinaryField, BooleanField, CharField, IntegerField,
+    PositiveIntegerField, SlugField, TextField)
 from django.db.models.fields.related import ManyToManyField, ForeignKey
 from django.db.transaction import atomic
 from .models import (Author, AuthorWithM2M, Book, BookWithLongName,
@@ -421,6 +422,38 @@ class SchemaTests(TransactionTestCase):
         columns = self.column_classes(Author)
         self.assertEqual(columns['name'][0], "TextField")
         self.assertEqual(bool(columns['name'][1][6]), False)
+
+    def test_alter_null_to_not_null(self):
+        """
+        #23609 - Tests handling of default values when altering from NULL to NOT NULL.
+        """
+        # Create the table
+        with connection.schema_editor() as editor:
+            editor.create_model(Author)
+        # Ensure the field is right to begin with
+        columns = self.column_classes(Author)
+        self.assertTrue(columns['height'][1][6])
+        # Create some test data
+        Author.objects.create(name='Not null author', height=12)
+        Author.objects.create(name='Null author')
+        # Verify null value
+        self.assertEqual(Author.objects.get(name='Not null author').height, 12)
+        self.assertIsNone(Author.objects.get(name='Null author').height)
+        # Alter the height field to NOT NULL with default
+        new_field = PositiveIntegerField(default=42)
+        new_field.set_attributes_from_name("height")
+        with connection.schema_editor() as editor:
+            editor.alter_field(
+                Author,
+                Author._meta.get_field_by_name("height")[0],
+                new_field
+            )
+        # Ensure the field is right afterwards
+        columns = self.column_classes(Author)
+        self.assertFalse(columns['height'][1][6])
+        # Verify default value
+        self.assertEqual(Author.objects.get(name='Not null author').height, 12)
+        self.assertEqual(Author.objects.get(name='Null author').height, 42)
 
     @unittest.skipUnless(connection.features.supports_foreign_keys, "No FK support")
     def test_alter_fk(self):
@@ -1040,3 +1073,53 @@ class SchemaTests(TransactionTestCase):
             DatabaseError,
             lambda: list(Thing.objects.all()),
         )
+
+    @unittest.skipUnless(connection.features.supports_foreign_keys, "No FK support")
+    def test_remove_constraints_capital_letters(self):
+        """
+        #23065 - Constraint names must be quoted if they contain capital letters.
+        """
+        def get_field(*args, **kwargs):
+            kwargs['db_column'] = "CamelCase"
+            field = kwargs.pop('field_class', IntegerField)(*args, **kwargs)
+            field.set_attributes_from_name("CamelCase")
+            return field
+
+        model = Author
+        field = get_field()
+        table = model._meta.db_table
+        column = field.column
+
+        with connection.schema_editor() as editor:
+            editor.create_model(model)
+            editor.add_field(model, field)
+
+            editor.execute(
+                editor.sql_create_index % {
+                    "table": editor.quote_name(table),
+                    "name": editor.quote_name("CamelCaseIndex"),
+                    "columns": editor.quote_name(column),
+                    "extra": "",
+                }
+            )
+            editor.alter_field(model, get_field(db_index=True), field)
+
+            editor.execute(
+                editor.sql_create_unique % {
+                    "table": editor.quote_name(table),
+                    "name": editor.quote_name("CamelCaseUniqConstraint"),
+                    "columns": editor.quote_name(field.column),
+                }
+            )
+            editor.alter_field(model, get_field(unique=True), field)
+
+            editor.execute(
+                editor.sql_create_fk % {
+                    "table": editor.quote_name(table),
+                    "name": editor.quote_name("CamelCaseFKConstraint"),
+                    "column": editor.quote_name(column),
+                    "to_table": editor.quote_name(table),
+                    "to_column": editor.quote_name(model._meta.auto_field.column),
+                }
+            )
+            editor.alter_field(model, get_field(Author, field_class=ForeignKey), field)

@@ -18,7 +18,8 @@ Core settings
 
 Here's a list of settings available in Django core and their default values.
 Settings provided by contrib apps are listed below, followed by a topical index
-of the core settings.
+of the core settings. For introductory material, see the :doc:`settings topic
+guide </topics/settings>`.
 
 .. setting:: ABSOLUTE_URL_OVERRIDES
 
@@ -28,7 +29,7 @@ ABSOLUTE_URL_OVERRIDES
 Default: ``{}`` (Empty dictionary)
 
 A dictionary mapping ``"app_label.model_name"`` strings to functions that take
-a model object and return its URL. This is a way of overriding
+a model object and return its URL. This is a way of inserting or overriding
 ``get_absolute_url()`` methods on a per-installation basis. Example::
 
     ABSOLUTE_URL_OVERRIDES = {
@@ -38,6 +39,11 @@ a model object and return its URL. This is a way of overriding
 
 Note that the model name used in this setting should be all lower-case, regardless
 of the case of the actual model class name.
+
+.. versionchanged:: 1.7.1
+
+    ``ABSOLUTE_URL_OVERRIDES`` now works on models that don't declare
+    ``get_absolute_url()``.
 
 .. setting:: ADMINS
 
@@ -698,6 +704,19 @@ tests will use a memory resident database. For all other database engines the
 test database will use the name ``'test_' + DATABASE_NAME``.
 
 See :ref:`the-test-database`.
+
+.. setting:: TEST_SERIALIZE
+
+SERIALIZE
+^^^^^^^^^
+
+.. versionadded:: 1.7.1
+
+Boolean value to control whether or not the default test runnner serializes the
+database into an in-memory JSON string before running tests (used to restore
+the database state between tests if you don't have transactions). You can set
+this to ``False`` to speed up creation time if you don't have any test classes
+with :ref:`serialized_rollback=True <test-case-serialized-rollback>`.
 
 .. setting:: TEST_CREATE
 
@@ -1556,7 +1575,7 @@ standard domain cookies, existing user cookies that have the old domain
 will not be updated. This will result in site users being unable to switch
 the language as long as these cookies persist. The only safe and reliable
 option to perform the switch is to change the language cookie name
-permanently (via the :setting:`SESSION_COOKIE_NAME` setting) and to add
+permanently (via the :setting:`LANGUAGE_COOKIE_NAME` setting) and to add
 a middleware that copies the value from the old cookie to a new one and then
 deletes the old one.
 
@@ -1592,7 +1611,7 @@ setting to use a deeper path than it previously used, existing user cookies that
 have the old path will not be updated. This will result in site users being
 unable to switch the language as long as these cookies persist. The only safe
 and reliable option to perform the switch is to change the language cookie name
-permanently (via the :setting:`SESSION_COOKIE_NAME` setting), and to add
+permanently (via the :setting:`LANGUAGE_COOKIE_NAME` setting), and to add
 a middleware that copies the value from the old cookie to a new one and then
 deletes the one.
 
@@ -1879,6 +1898,29 @@ Django will refuse to start if :setting:`SECRET_KEY` is not set.
     Running Django with a known :setting:`SECRET_KEY` defeats many of Django's
     security protections, and can lead to privilege escalation and remote code
     execution vulnerabilities.
+
+The secret key is used for:
+
+* All :doc:`sessions </topics/http/sessions>` if you are using
+  any other session backend than ``django.contrib.sessions.backends.cache``,
+  or if you use
+  :class:`~django.contrib.auth.middleware.SessionAuthenticationMiddleware`
+  and are using the default
+  :meth:`~django.contrib.auth.models.AbstractBaseUser.get_session_auth_hash()`.
+* All :doc:`messages </ref/contrib/messages>` if you are using
+  :class:`~django.contrib.messages.storage.cookie.CookieStorage` or
+  :class:`~django.contrib.messages.storage.fallback.FallbackStorage`.
+* :doc:`Form wizard </ref/contrib/formtools/form-wizard>` progress when using
+  cookie storage with
+  :class:`django.contrib.formtools.wizard.views.CookieWizardView`.
+* All :func:`~django.contrib.auth.views.password_reset` tokens.
+* All in progress :doc:`form previews </ref/contrib/formtools/form-preview>`.
+* Any usage of :doc:`cryptographic signing </topics/signing>`, unless a
+  different key is provided.
+
+If you rotate your secret key, all of the above will be invalidated.
+Secret keys are not used for passwords of users and key rotation will not
+affect them.
 
 .. setting:: SECURE_PROXY_SSL_HEADER
 
